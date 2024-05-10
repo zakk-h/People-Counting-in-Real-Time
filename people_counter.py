@@ -30,9 +30,9 @@ with open("utils/config.json", "r") as file:
 def parse_arguments():
 	# function to parse the arguments
     ap = argparse.ArgumentParser()
-    ap.add_argument("-p", "--prototxt", required=False,
+    ap.add_argument("-p", "--prototxt", default="detector/MobileNetSSD_deploy.prototxt",
         help="path to Caffe 'deploy' prototxt file")
-    ap.add_argument("-m", "--model", required=True,
+    ap.add_argument("-m", "--model", default="detector/MobileNetSSD_deploy.caffemodel",
         help="path to Caffe pre-trained model")
     ap.add_argument("-i", "--input", type=str,
         help="path to optional input video file")
@@ -45,22 +45,6 @@ def parse_arguments():
         help="# of skip frames between detections")
     args = vars(ap.parse_args())
     return args
-
-def send_mail():
-	# function to send the email alerts
-	Mailer().send(config["Email_Receive"])
-
-def log_data(move_in, in_time, move_out, out_time):
-	# function to log the counting data
-	data = [move_in, in_time, move_out, out_time]
-	# transpose the data to align the columns properly
-	export_data = zip_longest(*data, fillvalue = '')
-
-	with open('utils/data/logs/counting_data.csv', 'w', newline = '') as myfile:
-		wr = csv.writer(myfile, quoting = csv.QUOTE_ALL)
-		if myfile.tell() == 0: # check if header rows are already existing
-			wr.writerow(("Move In", "In Time", "Move Out", "Out Time"))
-			wr.writerows(export_data)
 
 def people_counter():
 	# main function for people_counter.py
@@ -103,14 +87,9 @@ def people_counter():
 	# initialize the total number of frames processed thus far, along
 	# with the total number of objects that have moved either up or down
 	totalFrames = 0
-	totalDown = 0
-	totalUp = 0
+	totalVisitors = 0
 	# initialize empty lists to store the counting data
 	total = []
-	move_out = []
-	move_in =[]
-	out_time = []
-	in_time = []
 
 	# start the frames per second throughput estimator
 	fps = FPS().start()
@@ -133,7 +112,7 @@ def people_counter():
 		# resize the frame to have a maximum width of 500 pixels (the
 		# less data we have, the faster we can process it), then convert
 		# the frame from BGR to RGB for dlib
-		frame = imutils.resize(frame, width = 500)
+		frame = imutils.resize(frame, width = 990)
 		rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
 		# if the frame dimensions are empty, set them
@@ -221,13 +200,6 @@ def people_counter():
 				# add the bounding box coordinates to the rectangles list
 				rects.append((startX, startY, endX, endY))
 
-		# draw a horizontal line in the center of the frame -- once an
-		# object crosses this line we will determine whether they were
-		# moving 'up' or 'down'
-		cv2.line(frame, (0, H // 2), (W, H // 2), (0, 0, 0), 3)
-		cv2.putText(frame, "-Prediction border - Entrance-", (10, H - ((i * 20) + 200)),
-			cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-
 		# use the centroid tracker to associate the (1) old object
 		# centroids with (2) the newly computed object centroids
 		objects = ct.update(rects)
@@ -241,52 +213,11 @@ def people_counter():
 			# if there is no existing trackable object, create one
 			if to is None:
 				to = TrackableObject(objectID, centroid)
-
-			# otherwise, there is a trackable object so we can utilize it
-			# to determine direction
+				totalVisitors += 1
 			else:
-				# the difference between the y-coordinate of the *current*
-				# centroid and the mean of *previous* centroids will tell
-				# us in which direction the object is moving (negative for
-				# 'up' and positive for 'down')
-				y = [c[1] for c in to.centroids]
-				direction = centroid[1] - np.mean(y)
 				to.centroids.append(centroid)
 
-				# check to see if the object has been counted or not
-				if not to.counted:
-					# if the direction is negative (indicating the object
-					# is moving up) AND the centroid is above the center
-					# line, count the object
-					if direction < 0 and centroid[1] < H // 2:
-						totalUp += 1
-						date_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-						move_out.append(totalUp)
-						out_time.append(date_time)
-						to.counted = True
-
-					# if the direction is positive (indicating the object
-					# is moving down) AND the centroid is below the
-					# center line, count the object
-					elif direction > 0 and centroid[1] > H // 2:
-						totalDown += 1
-						date_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-						move_in.append(totalDown)
-						in_time.append(date_time)
-						# if the people limit exceeds over threshold, send an email alert
-						if sum(total) >= config["Threshold"]:
-							cv2.putText(frame, "-ALERT: People limit exceeded-", (10, frame.shape[0] - 80),
-								cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 2)
-							if config["ALERT"]:
-								logger.info("Sending email alert..")
-								email_thread = threading.Thread(target = send_mail)
-								email_thread.daemon = True
-								email_thread.start()
-								logger.info("Alert sent!")
-						to.counted = True
-						# compute the sum of total people inside
-						total = []
-						total.append(len(move_in) - len(move_out))
+			to.framecount += 1
 
 			# store the trackable object in our dictionary
 			trackableObjects[objectID] = to
@@ -300,13 +231,11 @@ def people_counter():
 
 		# construct a tuple of information we will be displaying on the frame
 		info_status = [
-		("Exit", totalUp),
-		("Enter", totalDown),
 		("Status", status),
 		]
 
 		info_total = [
-		("Total people inside", ', '.join(map(str, total))),
+		("Total people", totalVisitors),
 		]
 
 		# display the output
@@ -317,10 +246,6 @@ def people_counter():
 		for (i, (k, v)) in enumerate(info_total):
 			text = "{}: {}".format(k, v)
 			cv2.putText(frame, text, (265, H - ((i * 20) + 60)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-		# initiate a simple log to save the counting data
-		if config["Log"]:
-			log_data(move_in, in_time, move_out, out_time)
 
 		# check to see if we should write the frame to disk
 		if writer is not None:
