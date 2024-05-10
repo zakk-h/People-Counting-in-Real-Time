@@ -5,7 +5,7 @@ from itertools import zip_longest
 from utils.mailer import Mailer
 from imutils.video import FPS
 from utils import thread
-import numpy as np
+import numpy
 import threading
 import argparse
 import datetime
@@ -39,9 +39,9 @@ def parse_arguments():
     ap.add_argument("-o", "--output", type=str,
         help="path to optional output video file")
     # confidence default 0.4
-    ap.add_argument("-c", "--confidence", type=float, default=0.4,
+    ap.add_argument("-c", "--confidence", type=float, default=0.7,
         help="minimum probability to filter weak detections")
-    ap.add_argument("-s", "--skip-frames", type=int, default=30,
+    ap.add_argument("-s", "--skip-frames", type=int, default=8,
         help="# of skip frames between detections")
     args = vars(ap.parse_args())
     return args
@@ -49,6 +49,9 @@ def parse_arguments():
 def people_counter():
 	# main function for people_counter.py
 	args = parse_arguments()
+
+	strongframe_every = args["skip_frames"]
+
 	# initialize the list of class labels MobileNet SSD was trained to detect
 	CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
 		"bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
@@ -80,7 +83,7 @@ def people_counter():
 	# instantiate our centroid tracker, then initialize a list to store
 	# each of our dlib correlation trackers, followed by a dictionary to
 	# map each unique object ID to a TrackableObject
-	ct = CentroidTracker(maxDisappeared=40, maxDistance=50)
+	ct = CentroidTracker()
 	trackers = []
 	trackableObjects = {}
 
@@ -112,7 +115,7 @@ def people_counter():
 		# resize the frame to have a maximum width of 500 pixels (the
 		# less data we have, the faster we can process it), then convert
 		# the frame from BGR to RGB for dlib
-		frame = imutils.resize(frame, width = 990)
+		frame = imutils.resize(frame, height = 800)
 		rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
 		# if the frame dimensions are empty, set them
@@ -134,7 +137,7 @@ def people_counter():
 
 		# check to see if we should run a more computationally expensive
 		# object detection method to aid our tracker
-		if totalFrames % args["skip_frames"] == 0:
+		if totalFrames % strongframe_every == 0:
 			# set the status and initialize our new set of object trackers
 			status = "Detecting"
 			trackers = []
@@ -146,7 +149,7 @@ def people_counter():
 			detections = net.forward()
 
 			# loop over the detections
-			for i in np.arange(0, detections.shape[2]):
+			for i in numpy.arange(0, detections.shape[2]):
 				# extract the confidence (i.e., probability) associated
 				# with the prediction
 				confidence = detections[0, 0, i, 2]
@@ -164,7 +167,7 @@ def people_counter():
 
 					# compute the (x, y)-coordinates of the bounding box
 					# for the object
-					box = detections[0, 0, i, 3:7] * np.array([W, H, W, H])
+					box = detections[0, 0, i, 3:7] * numpy.array([W, H, W, H])
 					(startX, startY, endX, endY) = box.astype("int")
 
 					# construct a dlib rectangle object from the bounding
@@ -252,7 +255,7 @@ def people_counter():
 			writer.write(frame)
 
 		# show the output frame
-		cv2.imshow("Real-Time Monitoring/Analysis Window", frame)
+		cv2.imshow("Analysis Window", frame)
 		key = cv2.waitKey(1) & 0xFF
 		# if the `q` key was pressed, break from the loop
 		if key == ord("q"):
