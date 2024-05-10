@@ -5,6 +5,5 @@ class TrackableObject:
 		self.objectID = objectID
 		self.centroids = [centroid]
 
-		# initialize a boolean used to indicate if the object has
-		# already been counted or not
-		self.counted = False
+		# number of frames that object was seen
+		self.framecount = 0
